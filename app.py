@@ -111,4 +111,3 @@ with st.sidebar.expander("➕ Gestisci Nomi Lavori"):
         conn.execute("INSERT INTO lavori (nome) VALUES (?)", (nuovo,))
         conn.commit()
         st.rerun()
-
