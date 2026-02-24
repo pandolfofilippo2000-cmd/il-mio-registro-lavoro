@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Mavriq Tracker Pro Cloud", layout="wide")
+st.set_page_config(page_title="Mavriq Tracker Pro", layout="wide")
 
 # --- CONNESSIONE SUPABASE ---
 @st.cache_resource
@@ -37,7 +37,7 @@ d_fine = st.sidebar.date_input("Fine Periodo:", fine_def)
 lavori_res = supabase.table("lavori").select("*").execute()
 lavori_df = pd.DataFrame(lavori_res.data)
 
-st.title("💰 Dashboard Mavriq (Memoria Eterna)")
+st.title("💰 Dashboard Lavoro & Guadagni")
 
 # --- GESTIONE NOMI LAVORI ---
 with st.sidebar.expander("➕ Gestisci Lavori"):
@@ -53,36 +53,41 @@ if not lavori_df.empty:
     df_sess = pd.DataFrame(sessioni_res.data)
 
     if not df_sess.empty:
-        # Calcolo Totali per Lavoro
         df_sess['nome_lavoro'] = df_sess['lavori'].apply(lambda x: x['nome'])
+        # Formattiamo la data per la mappa
+        df_sess['Data_IT'] = pd.to_datetime(df_sess['data']).dt.strftime('%d/%m/%Y')
+        
         stats = df_sess.groupby('nome_lavoro')['ore_decimali'].sum().reset_index()
         
+        # CARD COLORATE
         cols = st.columns(len(stats))
+        colori_card = ["#1E88E5", "#D81B60", "#FFC107", "#004D40"] # Blu, Rosa, Giallo, Verde
+        
         for i, row in stats.iterrows():
             n = row['nome_lavoro']
             o = row['ore_decimali']
+            colore = colori_card[i % len(colori_card)]
             with cols[i]:
+                st.markdown(f"<div style='border-left: 5px solid {colore}; padding-left: 10px;'>", unsafe_allow_html=True)
                 if "mavriq" in n.lower():
                     netto = (o * 8.60) * (1 - 0.1167)
                     st.metric(n, format_durata(o), f"€ {netto:.2f} Netto")
                 else:
                     st.metric(n, format_durata(o), "Fisso Mensile")
+                st.markdown("</div>", unsafe_allow_html=True)
         
-        st.bar_chart(stats, x="nome_lavoro", y="ore_decimali")
-
-        # --- MAPPA DETTAGLIATA ---
         st.divider()
         st.subheader("🗺️ Mappa Dettagliata Orari")
         df_sess['Dettaglio'] = df_sess['ora_inizio'] + " - " + df_sess['ora_fine'] + " (" + df_sess['ore_decimali'].apply(lambda x: f"{x:.2f}h") + ")"
-        mappa = df_sess.pivot_table(index='data', columns='nome_lavoro', values='Dettaglio', aggfunc=lambda x: ' / '.join(x)).fillna("-")
+        mappa = df_sess.pivot_table(index='Data_IT', columns='nome_lavoro', values='Dettaglio', aggfunc=lambda x: ' / '.join(x)).fillna("-")
         st.dataframe(mappa, use_container_width=True)
 
         # --- ELIMINAZIONE ---
         with st.expander("🗑️ Elimina Turno Errato"):
-            id_del = st.selectbox("ID Turno:", df_sess['id'], format_func=lambda x: f"ID {x} del {df_sess[df_sess['id']==x]['data'].values[0]}")
+            id_del = st.selectbox("Seleziona turno da eliminare:", df_sess['id'], format_func=lambda x: f"ID {x} del {df_sess[df_sess['id']==x]['Data_IT'].values[0]} ({df_sess[df_sess['id']==x]['nome_lavoro'].values[0]})")
             if st.button("CONFERMA RIMOZIONE"):
                 supabase.table("sessioni").delete().eq("id", id_del).execute()
-                st.warning("Turno rimosso per sempre!")
+                st.warning("Turno rimosso!")
                 st.rerun()
 
 # --- INSERIMENTO ---
@@ -93,10 +98,12 @@ if not lavori_df.empty:
         c1, c2, c3 = st.columns(3)
         lav_scelto = c1.selectbox("Lavoro:", lavori_df['nome'])
         giorno = c2.date_input("Giorno:", date.today())
-        t1 = c3.time_input("Inizio:", datetime.strptime("09:00", "%H:%M").time())
-        t2 = c3.time_input("Fine:", datetime.strptime("13:00", "%H:%M").time())
+        # Step=900 significa 15 minuti, rende la selezione molto più fluida
+        t1 = c3.time_input("Inizio:", datetime.strptime("09:00", "%H:%M").time(), step=900)
+        t2 = c3.time_input("Fine:", datetime.strptime("13:00", "%H:%M").time(), step=900)
         
         if st.form_submit_button("REGISTRA"):
+            # Calcolo ore corretto anche se si scavalca la mezzanotte (opzionale)
             ore = (datetime.combine(date.today(), t2) - datetime.combine(date.today(), t1)).total_seconds() / 3600
             if ore > 0:
                 id_lav = lavori_df[lavori_df['nome'] == lav_scelto]['id'].values[0]
