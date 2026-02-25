@@ -30,8 +30,8 @@ else:
     fine_def = (ini_def.replace(day=28) + timedelta(days=5)).replace(day=15)
 
 st.sidebar.header("🗓️ Filtro Periodo")
-d_inizio = st.sidebar.date_input("Dal:", ini_def, format="DD/MM/YYYY")
-d_fine = st.sidebar.date_input("Al:", fine_def, format="DD/MM/YYYY")
+d_inizio = st.sidebar.date_input("Inizio:", ini_def, format="DD/MM/YYYY")
+d_fine = st.sidebar.date_input("Fine:", fine_def, format="DD/MM/YYYY")
 
 # --- RECUPERO DATI ---
 lavori_res = supabase.table("lavori").select("*").execute()
@@ -65,35 +65,16 @@ if not lavori_df.empty:
 
     # --- 📅 PIANIFICAZIONE ---
     st.divider()
-    with st.expander("📅 Pianificazione Settimana (Clicca per espandere)"):
-        prog_res = supabase.table("programmazione").select("*, lavori(nome)").order("data").execute()
-        df_prog = pd.DataFrame(prog_res.data)
-        if not df_prog.empty:
-            df_prog['Data_IT'] = pd.to_datetime(df_prog['data']).dt.strftime('%d/%m/%Y')
-            for d_it in df_prog['Data_IT'].unique():
-                st.write(f"**{d_it}**")
-                turni = df_prog[df_prog['Data_IT'] == d_it]
-                for r in turni.itertuples():
-                    c1, c2, c3 = st.columns([3, 2, 1])
-                    c1.write(f"{r.lavori['nome']}")
-                    c2.write(f"🕒 {r.ora_inizio}-{r.ora_fine}")
-                    if c3.button("✅", key=f"c_{r.id}"):
-                        supabase.table("sessioni").insert({"lavoro_id": r.lavoro_id, "data": str(r.data), "ora_inizio": r.ora_inizio, "ora_fine": r.ora_fine, "ore_decimali": row.ore_decimali}).execute()
-                        supabase.table("programmazione").delete().eq("id", r.id).execute()
-                        st.rerun()
-
-    # --- 🗺️ REGISTRO EFFETTIVO (TABELLA SLIM) ---
-    st.subheader("🗺️ Registro Orari Effettivi")
-    if not df_sess.empty:
-        df_sess['Orario'] = df_sess['ora_inizio'] + " - " + df_sess['ora_fine']
-        # Tabella pulita e compatta
-        mappa = df_sess.pivot_table(index='Data_IT', columns='nome_lavoro', values='Orario', aggfunc=lambda x: ' / '.join(x)).fillna("-")
-        st.dataframe(mappa, use_container_width=True)
-
-        with st.expander("🗑️ Elimina un errore"):
-            id_del = st.selectbox("Seleziona turno da rimuovere:", df_sess['id'], format_func=lambda x: f"{df_sess[df_sess['id']==x]['Data_IT'].values[0]} - {df_sess[df_sess['id']==x]['nome_lavoro'].values[0]}")
-            if st.button("CONFERMA ELIMINAZIONE"):
-                supabase.table("sessioni").delete().eq("id", id_del).execute()
-                st.rerun()
-    else:
-        st.info("Nessun orario trovato per questo periodo.")
+    with st.expander("📅 Pianificazione Settimana"):
+        # Form inserimento programmazione
+        with st.form("form_prog", clear_on_submit=True):
+            st.write("**Aggiungi turno da pianificare**")
+            c1, c2 = st.columns(2)
+            p_lav = c1.selectbox("Lavoro:", lavori_df['nome'], key="p_lav")
+            p_data = c2.date_input("Giorno:", today + timedelta(days=1), format="DD/MM/YYYY")
+            p_t1 = c1.time_input("Inizio:", datetime.strptime("09:00", "%H:%M").time(), step=900)
+            p_t2 = c2.time_input("Fine:", datetime.strptime("13:00", "%H:%M").time(), step=900)
+            if st.form_submit_button("AGGIUNGI A PROGRAMMAZIONE"):
+                p_ore = (datetime.combine(date.today(), p_t2) - datetime.combine(date.today(), p_t1)).total_seconds() / 3600
+                p_id_lav = lavori_df[lavori_df['nome'] == p_lav]['id'].values[0]
+                supabase.table("programmazione").insert({"lavoro_id": int(p_id_lav), "data": str(p_data), "ora_inizio": p_t1.strftime("%H:%M"),
